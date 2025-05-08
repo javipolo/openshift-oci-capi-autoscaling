@@ -1,0 +1,26 @@
+{
+  "ignition": {
+    "version": "3.1.0"
+  },
+  "storage": {
+    "files": [
+      {
+        "contents": {
+          "source": "data:text/plain;charset=utf-8;base64,IyEvYmluL2Jhc2ggLXgKCk9DSV9IT1NUTkFNRT0vZXRjL2hvc3RuYW1lLW9jaQp1bnRpbCBbWyAtcyAkT0NJX0hPU1ROQU1FIF1dOyBkbwogICAgL3Vzci9iaW4vY3VybCAtcyAtSCAiQXV0aG9yaXphdGlvbjogQmVhcmVyIE9yYWNsZSIgaHR0cDovLzE2OS4yNTQuMTY5LjI1NC9vcGMvdjIvaW5zdGFuY2UvaG9zdG5hbWUgLW8gJE9DSV9IT1NUTkFNRQpkb25lCgpjYXQgJE9DSV9IT1NUTkFNRSA+IC9wcm9jL3N5cy9rZXJuZWwvaG9zdG5hbWUK"
+        },
+        "filesystem": "root",
+        "mode": 493,
+        "path": "/usr/local/bin/set-hostname-oci.sh"
+      }
+    ]
+  },
+  "systemd": {
+    "units": [
+      {
+        "name": "set-hostname-oci.service",
+        "enabled": true,
+        "contents": "[Unit]\nDescription=Set OCI hostname\nBefore=node-valid-hostname.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nUser=root\nExecStart=/usr/local/bin/set-hostname-oci.sh\n\n# Wait up to 5min\nTimeoutSec=300\n\n[Install]\nWantedBy=kubelet-dependencies.target"
+      }
+    ]
+  }
+}

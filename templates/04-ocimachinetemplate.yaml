@@ -1,0 +1,18 @@
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: OCIMachineTemplate
+metadata:
+  name: ${cluster_name}-autoscaling
+  namespace: openshift-machine-api
+spec:
+  template:
+    spec:
+      imageId: ${image}
+      compartmentId: ${compartment}
+      shape: VM.Standard.E4.Flex
+      shapeConfig:
+        ocpus: "6"
+        memoryInGBs: "16"
+      metadata:
+        ssh_authorized_keys: "${ssh_authorized_keys}"
+      isPvEncryptionInTransitEnabled: false

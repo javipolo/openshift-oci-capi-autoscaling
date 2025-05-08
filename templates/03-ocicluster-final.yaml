@@ -1,0 +1,23 @@
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: OCICluster
+metadata:
+  name: ${cluster_name}
+  namespace: openshift-machine-api
+  labels:
+    cluster.x-k8s.io/cluster-name: ${cluster_name}
+spec:
+  compartmentId: ${compartment}
+  networkSpec:
+    skipNetworkManagement: true
+    vcn:
+      id: ${vcn}
+      subnets:
+      - id: ${subnet}
+        name: private
+        role: worker
+      networkSecurityGroup:
+        list:
+        - id: ${nsg}
+          name: cluster-compute-nsg
+          role: worker
