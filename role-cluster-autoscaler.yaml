@@ -2,6 +2,36 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  name: cluster-autoscaler-operator-resources
+rules:
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - "*"  # Include all resources in this API group to be safe
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-autoscaler-operator-resources
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-autoscaler-operator-resources
+subjects:
+- kind: ServiceAccount
+  name: cluster-autoscaler-operator
+  namespace: openshift-machine-api
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   name: cluster-autoscaler-resources
 rules:
   - apiGroups:

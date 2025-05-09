@@ -10,6 +10,8 @@ image_name=rhcos-vanilla-openstack
 ssh_authorized_keys="$(head -n1 ~/.ssh/id_ed25519.pub)"
 
 vcn=$(oci network vcn list --compartment-id "$compartment" --display-name "$oci_cluster_name" | jq -r '.data[0].id')
+apiserver_lb=$(oci lb load-balancer list --compartment-id $compartment --display-name ${oci_cluster_name}-openshift_api_apps_lb | jq -r '.data[].id')
+control_plane_endpoint=$(oci lb load-balancer list --compartment-id $compartment --display-name ${oci_cluster_name}-openshift_api_apps_lb | jq -r '.data[]."ip-addresses"[] | select(."is-public" == true) | ."ip-address"')
 subnet=$(oci network subnet list --compartment-id "$compartment" --vcn-id "$vcn" --display-name "$subnet_name" | jq -r '.data[0].id')
 nsg=$(oci network nsg list --compartment-id "$compartment" --vcn-id "$vcn" --display-name "$nsg_name" | jq -r '.data[0].id')
 image=$(oci compute image list --compartment-id "$compartment" --display-name "$image_name" | jq -r '.data[0].id')
@@ -17,6 +19,8 @@ image=$(oci compute image list --compartment-id "$compartment" --display-name "$
 export ssh_authorized_keys
 export cluster_name
 export vcn
+export apiserver_lb
+export control_plane_endpoint
 export subnet
 export nsg
 export image
@@ -27,6 +31,8 @@ Autodiscovered values for manifests
 
 cluster_name=$cluster_name
 vcn=$vcn
+apiserver_lb=$apiserver_lb
+control_plane_endpoint=$control_plane_endpoint
 subnet=$subnet
 nsg=$nsg
 image=$image

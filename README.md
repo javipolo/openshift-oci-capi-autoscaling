@@ -74,39 +74,34 @@ oc patch deployment cluster-capi-operator \
               ] } } } }'
 ```
 
-- Update serviceaccount permissions for cluster-autoscaler-operator
-```
-oc apply -f role-cluster-autoscaler-operator.yaml
-```
-
 - Patch cluster-autoscaler-operator to
   - Set a custom image that exports CAPI_GROUP and CAPI_VERSION env vars to cluster-autoscaler
   - Set CAPI_GROUP to the generic CAPI version
   - Set a custom cluster-autoscaler image to be used (it's just a build of current main branch of https://github.com/openshift/kubernetes-autoscaler)
 ```
- oc patch deployment cluster-autoscaler-operator \
-   -n openshift-machine-api \
-  --type='strategic' \
-  -p='{ "spec": {
-          "template": {
-            "spec": {
-              "containers": [
-                {
-                  "name": "cluster-autoscaler-operator",
-                  "image": "quay.io/jpolo/cluster-autoscaler-operator:latest",
-                  "env": [
-                    {
-                      "name": "CAPI_GROUP",
-                      "value": "cluster.x-k8s.io"
-                    },
-                    {
-                      "name": "CLUSTER_AUTOSCALER_IMAGE",
-                      "value": "quay.io/jpolo/cluster-autoscaler:latest"
-                    }
-                  ] } ] } } } }'
+oc patch deployment cluster-autoscaler-operator \
+  -n openshift-machine-api \
+ --type='strategic' \
+ -p='{ "spec": {
+         "template": {
+           "spec": {
+             "containers": [
+               {
+                 "name": "cluster-autoscaler-operator",
+                 "image": "quay.io/jpolo/cluster-autoscaler-operator:latest",
+                 "env": [
+                   {
+                     "name": "CAPI_GROUP",
+                     "value": "cluster.x-k8s.io"
+                   },
+                   {
+                     "name": "CLUSTER_AUTOSCALER_IMAGE",
+                     "value": "quay.io/jpolo/cluster-autoscaler:latest"
+                   }
+                 ] } ] } } } }'
 ```
 
-- Update serviceaccount permissions for cluster-autoscaler
+- Update permissions so cluster-autoscaler can access the objects in `cluster.x-k8s.io` apiGroup
 ```
 oc apply -f role-cluster-autoscaler.yaml
 ```
@@ -153,39 +148,18 @@ make -C cluster-api-provider-oci deploy
 ./create-manifests.sh
 ```
 
-- Create OCICluster and Cluster
+- Create OCICluster, Cluster, OCIMachineTemplate, MachineDeployment and Autoscaler resources
 ```
-oc apply -f manifests/01-ocicluster-initial.yaml -f manifests/02-cluster.yaml
+oc apply -f manifests/
 ```
 
-- Wait for cluster to be reconciled properly. It should appear in `Provisioned` state
+- Wait for cluster to be reconciled properly. It should be in `Provisioned` state
 ```
 oc get cluster -n openshift-machine-api -w
 ```
 
-- Update OCICluster to reflect that network management is done outside the OCICluster resource
-```
-oc apply -f manifests/03-ocicluster-final.yaml
-```
-
-- Create OCIMachineTemplate and MachineDeployment
-```
-oc apply -f manifests/04-ocimachinetemplate.yaml -f manifests/05-machinedeployment.yaml
-```
-
-- Create ClusterAutoscaler
-```
-oc apply -f manifests/06-clusterautoscaler.yaml
-```
 
 ## Test autoscaling
-- Create deployment for nginx, with resource requests of 2Gb
-```
-oc create deployment nginx --namespace default --image=docker.io/nginx:latest --replicas=0
-oc set resources deployment -n default nginx --requests=memory=2Gi
-oc scale deployment -n default nginx --replicas=11
-```
-
 - Run csr auto approval in other terminal
 ```
 openshift_wait_and_sign_certificate(){
@@ -196,23 +170,37 @@ openshift_wait_and_sign_certificate(){
     oc get csr -o json | jq '.items[] | select(.status.conditions==null) | .metadata.name' -r | xargs -n1 oc adm certificate approve
 }
 
-openshift_wait_and_sign_certificate ; openshift_wait_and_sign_certificate
+while true; do openshift_wait_and_sign_certificate ; done
+```
+
+- Create deployment for nginx, with resource requests of 5Gb
+```
+oc create deployment nginx --namespace default --image=docker.io/nginx:latest --replicas=0
+oc set resources deployment -n default nginx --requests=memory=2Gi
+oc scale deployment -n default nginx --replicas=20
 ```
 
 - Wait for node to pop up
 ```
-oc get md -w
+oc get md
 oc get cluster
 oc get node
 ```
 
-## ISSUES
-- Deploying capoci requires cert-manager
-- Manual CAPOCI installation requires fixing SCC issues
-- CAPOCI is unable to reconcile a cluster with existing infrastructure. We need to create it first with `skipNetworkManagement:
-  false` and then update it setting it to true
-- openshift CAPI CRDs use cluster.x-k8s.io as kind domain, while openshift-cluster-autoscaler uses machine.openshift.io
-- New nodes dont pick up hostname automatically. Had to add a systemd unit to do so
-- Need to set up some automatic node approval system
-- CAPOCI does not set automatically memory/cpu/resources needed annotations in MachineDeployment: `capacity.cluster-autoscaler.kubernetes.io/cpu: "6"`
-- CAPI does not create automatically kubeconfig resource
+- Now let's try to scale down:
+```
+oc scale deployment -n default nginx --replicas=15
+```
+
+- Wait for node to be removed
+
+## Issues found and things to improve
+- CAPI does not create automatically kubeconfig resource.
+- Openshift's CAPI uses cluster.x-k8s.io as apiGroup, while openshift-cluster-autoscaler uses machine.openshift.io.
+- CAPOCI requires cert-manager.
+- CAPOCI installation in openshift requires fixing SCC issues. Added to our custom capoci repo.
+- CAPOCI is unable to reconcile an existing apiserver. According to [documentation](https://oracle.github.io/cluster-api-provider-oci/gs/externally-managed-cluster-infrastructure.html#example-ocicluster-spec-with-external-infrastructure) an annotation should be enough, but when applying it, cluster never shows as Provisioned. We hacked it into CAPOCI to achieve this but we should probably do it in a better way.
+- CAPOCI does not automatically set memory/cpu/resources needed annotations in MachineDeployment: `capacity.cluster-autoscaler.kubernetes.io/cpu: "6"`. See https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/20210310-opt-in-autoscaling-from-zero.md
+- New nodes dont pick up hostname automatically. Had to add a systemd unit to do so. We should investigate why
+- Nodes need to be manually approved with `oc adm certificate approve`. Some automatic system should be created. [This is how Hypershift handles it](https://github.com/openshift/hypershift/pull/5349)
+- cluster-autoscaler keeps complaining about pre-existing nodes not being handled by anything. It would be nice to tell the compoment to ignore those nodes

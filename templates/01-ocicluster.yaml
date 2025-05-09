@@ -6,9 +6,19 @@ metadata:
   namespace: openshift-machine-api
   labels:
     cluster.x-k8s.io/cluster-name: ${cluster_name}
+  annotations:
+    # Using managed-by annotation to skip all infrastructure management did not work
+    # cluster.x-k8s.io/managed-by: "external"
+    # So we crafted a custom annotation to skip apiserver loadbalancer reconcile:
+    cluster.x-k8s.io/skip-apiserver-lb-management: "true"
 spec:
   compartmentId: ${compartment}
+  controlPlaneEndpoint:
+    host: ${control_plane_endpoint}
+    port: 6443
   networkSpec:
+    apiServerLoadBalancer:
+      loadBalancerId: ${apiserver_lb}
     skipNetworkManagement: true
     vcn:
       id: ${vcn}
