@@ -3,6 +3,40 @@
 Here is a runbook on how to achieve Cluster Autoscaling in an Openshift cluster in Oracle Cloud
 To do so, we rely on Cluster API (CAPI) with OCI infrastructure provider
 
+## Modified or custom images
+For this PoC we use custom images. Here's some more information about those custom images
+
+### cluster-capi-operator
+We need CAPI to support OCI resources (OCICluster, OCIMachine, ....)
+
+https://github.com/javipolo/cluster-capi-operator/tree/oci-support adds support for those resources
+A ready to use container image is in `quay.io/jpolo/cluster-capi-operator:latest`
+
+### cluster-api-provider-oci
+cluster-api-provider-oci (or CAPOCI) has several changes:
+- Add support to skip Api LoadBalancer management
+- Some hacks to the kustomize manifests to deploy using credentials
+- A script that imports Oracle Cloud configuration from `oci-cli`
+
+https://github.com/javipolo/cluster-api-provider-oci/tree/capi-autoscaling
+A ready to use container image is in `quay.io/jpolo/cluster-api-oci-controller-amd64:dev-skip-with-annotation`
+
+### cluster-autoscaler-operator
+cluster-autoscaler-operator honors the environment variables `CAPI_GROUP` and `CAPI_VERSION`, but we also need those variables to
+be exported to the `cluster-autoscaler` deployment it creates
+
+https://github.com/javipolo/cluster-autoscaler-operator/tree/exportCAPIvars
+
+A ready to use container image is in `quay.io/jpolo/cluster-autoscaler-operator:latest`
+
+### cluster-autoscaler
+cluster-autoscaler current version in Openshift 4.18.10 does not detect our `MachineDeployment`, but the latest version in the
+official git repository does. All that takes is building the main branch
+
+https://github.com/openshift/kubernetes-autoscaler/tree/main
+
+A ready to use container image is in `quay.io/jpolo/cluster-autoscaler:latest`
+
 ## Prerequisites
 
 - oci-cli installed and configured
@@ -51,9 +85,6 @@ oc -n openshift-cluster-version scale deploy/cluster-version-operator --replicas
 ```
 
 ## Use custom version of cluster-capi-operator
-We need CAPI to support OCI resources (OCICluster, OCIMachine, ....) so we have a [modified version of Cluster CAPI Operator](https://github.com/javipolo/cluster-capi-operator/tree/oci-support) that adds support for those resources
-The container image with those changes is in `quay.io/jpolo/cluster-capi-operator:latest`
-
 - Use our custom cluster-capi-operator
 ```
 oc patch deployment cluster-capi-operator \
@@ -75,9 +106,9 @@ oc patch deployment cluster-capi-operator \
 ```
 
 - Patch cluster-autoscaler-operator to
-  - Set a custom image that exports CAPI_GROUP and CAPI_VERSION env vars to cluster-autoscaler
+  - Use a custom container image
   - Set CAPI_GROUP to the generic CAPI version
-  - Set a custom cluster-autoscaler image to be used (it's just a build of current main branch of https://github.com/openshift/kubernetes-autoscaler)
+  - Set a custom cluster-autoscaler container image to be used
 ```
 oc patch deployment cluster-autoscaler-operator \
   -n openshift-machine-api \
