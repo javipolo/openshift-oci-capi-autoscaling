@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+if [ $# -lt 1 ]; then
+    # Use default namespace
+    namespace=capi-system
+else
+    namespace="$1"
+fi
+
 export compartment=ocid1.compartment.oc1..aaaaaaaasno3ok3vmccrkahvyogfqdzyizp4vrpluxlgrjnhcins5hjoh6yq
 cluster_name=$(oc get infrastructure cluster -ojsonpath='{.status.infrastructureName}')
 oci_cluster_name=$(echo "$cluster_name" | rev | cut -d - -f 2- | rev)
@@ -16,6 +23,7 @@ subnet=$(oci network subnet list --compartment-id "$compartment" --vcn-id "$vcn"
 nsg=$(oci network nsg list --compartment-id "$compartment" --vcn-id "$vcn" --display-name "$nsg_name" | jq -r '.data[0].id')
 image=$(oci compute image list --compartment-id "$compartment" --display-name "$image_name" | jq -r '.data[0].id')
 
+export namespace
 export ssh_authorized_keys
 export cluster_name
 export vcn

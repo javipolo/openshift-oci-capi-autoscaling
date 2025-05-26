@@ -10,7 +10,7 @@ fi
 
 if [ $# -lt 1 ]; then
     # Use default namespace
-    namespace=openshift-machine-api
+    namespace=capi-system
 else
     namespace="$1"
 fi

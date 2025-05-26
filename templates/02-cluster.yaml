@@ -3,7 +3,7 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
   name: ${cluster_name}
-  namespace: openshift-machine-api
+  namespace: ${namespace}
   annotations:
     cluster.x-k8s.io/managed-by: self
   labels:
@@ -21,4 +21,4 @@ spec:
     apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
     kind: OCICluster
     name: ${cluster_name}
-    namespace: openshift-machine-api
+    namespace: ${namespace}
