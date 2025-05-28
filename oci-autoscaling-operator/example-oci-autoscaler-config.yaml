@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oci-autoscaler-config
+  namespace: capi-system
+data:
+  # Minimum and maximum number of nodes used for autoscaling
+  # Set max to 0 to disable autoscaling
+  ociAutoscalingNodegroupMin: "${autoscaling_nodegroup_min}"
+  ociAutoscalingNodegroupMax: "${autoscaling_nodegroup_max}"
+  # VM Shape to use
+  ociAutoscalingShape: ${autoscaling_shape}
+  ociAutoscalingShapeConfigCPUs: "${autoscaling_shapeconfig_cpu}"
+  ociAutoscalingShapeConfigMemory: "${autoscaling_shapeconfig_memory}"

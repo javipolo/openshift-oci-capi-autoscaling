@@ -1,0 +1,57 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: capi-system
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oci-autoscaling-operator
+  namespace: capi-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oci-autoscaling-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: oci-autoscaling-operator
+  namespace: capi-system
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: oci-autoscaling-operator
+  name: oci-autoscaling-operator
+  namespace: capi-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oci-autoscaling-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oci-autoscaling-operator
+    spec:
+      containers:
+      - command:
+        - ./oci-autoscaling-operator.sh
+        image: quay.io/jpolo/oci-autoscaling-operator-bash:latest
+        name: oci-autoscaling-operator
+      - command:
+        - ./wait-and-sign-all-certificates.sh
+        image: quay.io/jpolo/oci-autoscaling-operator-bash:latest
+        name: oci-certificate-signer
+      serviceAccount: oci-autoscaling-operator
+      serviceAccountName: oci-autoscaling-operator
+

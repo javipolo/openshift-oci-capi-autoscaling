@@ -3,6 +3,10 @@
 Here is a runbook on how to achieve Cluster Autoscaling in an Openshift cluster in Oracle Cloud
 To do so, we rely on Cluster API (CAPI) with OCI infrastructure provider
 
+There are two ways of installing this:
+- Provision a cluster, and then deploy the different components
+- Use the oci-autoscaling-operator to set everything up
+
 ## Modified or custom images
 
 ### cluster-api-provider-oci
@@ -14,12 +18,13 @@ cluster-api-provider-oci (or CAPOCI) has several changes:
 https://github.com/javipolo/cluster-api-provider-oci/tree/capi-autoscaling
 A ready to use container image is in `quay.io/jpolo/cluster-api-oci-controller-amd64:dev-skip-with-annotation`
 
-## Prerequisites
+## Method 1. Installing components manually
+### Prerequisites
 
 - [oci-cli](https://github.com/oracle/oci-cli) installed and configured
 - [clusterctl](https://cluster-api.sigs.k8s.io/user/quick-start#install-clusterctl)
 
-## Provision cluster
+### Provision cluster
 
 - Create cluster in [assisted installer](https://console.redhat.com/openshift/assisted-installer)
     - Use a domain name that you can manage in Oracle Cloud
@@ -41,10 +46,10 @@ A ready to use container image is in `quay.io/jpolo/cluster-api-oci-controller-a
 - Download kubeconfig and set it as default
 - Wait until cluster is fully settled. You can monitor the status with `oc get clusterversion` and `oc get clusteroperators`
 
-## Create a new OCI custom image
+### Create a new OCI custom image
   [Create a Custom Linux Image](https://docs.public.oneportal.content.oci.oraclecloud.com/en-us/iaas/compute-cloud-at-customer/topics/images/importing-custom-linux-imges.htm) using [rhcos-openstack qcow2 file](https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.18/latest/rhcos-4.18.1-x86_64-openstack.x86_64.qcow2.gz)
 
-## Install cert-manager
+### Install cert-manager
 cert-manager is needed for both CAPI and CAPOCI, so we need to install it first
 
 - Install cert-manager
@@ -52,16 +57,18 @@ cert-manager is needed for both CAPI and CAPOCI, so we need to install it first
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
 ```
 
-## Install upstream CAPI
+### Install upstream CAPI
 
 ```
 clusterctl generate provider --core cluster-api | grep -vE 'runAs(User|Group)' | oc apply -f -
 ```
 
-## Install upstream cluster-autoscaler
+### Install upstream cluster-autoscaler
 
 ```
-helm install  cluster-autoscaler autoscaler/cluster-autoscaler --values cluster-autoscaler-values.yaml --namespace capi-system
+helm repo add autoscaler https://kubernetes.github.io/autoscaler
+helm repo update
+helm install oci-cluster-autoscaler autoscaler/cluster-autoscaler --values cluster-autoscaler-values.yaml --namespace capi-system
 ```
 
 and update permissions so cluster-autoscaler can access the objects in `cluster.x-k8s.io` apiGroup
@@ -69,7 +76,7 @@ and update permissions so cluster-autoscaler can access the objects in `cluster.
 oc apply -f role-cluster-autoscaler.yaml
 ```
 
-## Provision CAPOCI
+### Provision CAPOCI
 
 - Clone CAPOCI repo
 ```
@@ -89,7 +96,7 @@ make -C cluster-api-provider-oci import-oci-cli-config
 make -C cluster-api-provider-oci deploy
 ```
 
-## Create CAPI cluster
+### Create CAPI cluster
 
 - Create bootstrap ignition in a secret
 ```
@@ -117,6 +124,34 @@ oc apply -f manifests/
 oc get cluster -n openshift-machine-api -w
 ```
 
+## Method 2. Everything automated with oci-autoscaling-operator
+
+### Provision cluster
+
+We create a cluster in the same way as before, just using a different terraform stack that:
+- Creates a new IAM user to be used by CAPOCI
+- Includes manifests to deploy oci-autoscaling-operator
+
+#### Steps
+- Create cluster in [assisted installer](https://console.redhat.com/openshift/assisted-installer)
+    - Use a domain name that you can manage in Oracle Cloud
+    - Enable `Integrate with external partner platforms` - `Oracle Cloud Infrastructure`
+    - Create minimal ISO
+    - Upload ISO to OCI bucket
+    - Create pre-authenticated request for ISO in bucket
+- Create OCI stack:
+    - My-configuration
+    - Using zip file: [create-cluster-autoscaling-v0.1.0.zip](https://github.com/javipolo/oci-openshift/releases/)
+    - Set the cluster name to the same name than in assisted-installer
+    - Copy pre-authenticated request into `Openshift image source URI`
+    - Set the `zone DNS` to the same domain than you set in assisted-installer
+    - Configure the rest of parameters as desired
+    - Run apply on the created stack
+- Go back to assisted service UI and set the node roles
+    - Add an `oci.yml` custom manifest
+        - Copy it from the OCI stack output `dynamic_custom_manifest`
+- Download kubeconfig and set it as default
+- Wait until cluster is fully settled. You can monitor the status with `oc get clusterversion` and `oc get clusteroperators`
 
 ## Test autoscaling
 - Run csr auto approval in other terminal

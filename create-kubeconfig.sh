@@ -23,6 +23,11 @@ _cleanup(){
     rm -fr $tmpdir
 }
 
+if oc get secret -n $namespace $secret -oname | grep -q .; then
+    echo "Secret $secret already exists, doing nothing"
+    exit 0
+fi
+
 oc create serviceaccount $cluster_name -n $namespace
 oc extract -n kube-system configmap/kube-root-ca.crt --to=- > $tmpdir/cluster-ca.crt
 oc adm policy add-cluster-role-to-user cluster-admin -z $cluster_name -n $namespace

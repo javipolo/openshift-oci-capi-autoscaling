@@ -1,0 +1,24 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oci-autoscaling-operator
+  namespace: capi-system
+data:
+  # OCI related variables
+  ociCompartmentId: ${compartment}
+  ociVcnId: ${vcn}
+  ociApiserverLb: ${apiserver_lb}
+  ociSubnetId: ${subnet}
+  ociNSGId: ${nsg}
+  ociImageId: ${image}
+  controlPlaneEndpoint: ${control_plane_endpoint}
+
+  # Variables to configure CAPOCI deployment
+  # TODO: use instance principal
+  capociTenancyId: ${tenancy}
+  capociUserId: ${user}
+  capociFingerprint: ${fingerprint}
+  capociRegion: ${region}
+  capociUseInstancePrincipal: "false"
+
