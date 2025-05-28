@@ -1,0 +1,9 @@
+cloudProvider: clusterapi
+fullnameOverride: oci-cluster-autoscaler
+autoDiscovery:
+  namespace: capi-system
+rbac:
+  create: true
+  serviceAccount:
+    create: true
+    name: oci-cluster-autoscaler

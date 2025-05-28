@@ -3,16 +3,14 @@ apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: OCIMachineTemplate
 metadata:
   name: ${cluster_name}-autoscaling
-  namespace: ${namespace}
+  namespace: ${capi_namespace}
 spec:
   template:
     spec:
       imageId: ${image}
       compartmentId: ${compartment}
-      shape: VM.Standard.E4.Flex
+      shape: "${autoscaling_shape}"
       shapeConfig:
-        ocpus: "6"
-        memoryInGBs: "16"
-      metadata:
-        ssh_authorized_keys: "${ssh_authorized_keys}"
+        ocpus: "${autoscaling_shapeconfig_cpu}"
+        memoryInGBs: "${autoscaling_shapeconfig_memory}"
       isPvEncryptionInTransitEnabled: false

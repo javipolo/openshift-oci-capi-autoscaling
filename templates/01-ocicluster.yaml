@@ -3,7 +3,7 @@ apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: OCICluster
 metadata:
   name: ${cluster_name}
-  namespace: ${namespace}
+  namespace: ${capi_namespace}
   labels:
     cluster.x-k8s.io/cluster-name: ${cluster_name}
   annotations:

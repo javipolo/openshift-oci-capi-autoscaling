@@ -3,9 +3,9 @@ set -euo pipefail
 
 if [ $# -lt 1 ]; then
     # Use default namespace
-    namespace=capi-system
+    capi_namespace=capi-system
 else
-    namespace="$1"
+    capi_namespace="$1"
 fi
 
 export compartment=ocid1.compartment.oc1..aaaaaaaasno3ok3vmccrkahvyogfqdzyizp4vrpluxlgrjnhcins5hjoh6yq
@@ -14,7 +14,11 @@ oci_cluster_name=$(echo "$cluster_name" | rev | cut -d - -f 2- | rev)
 nsg_name=cluster-compute-nsg
 subnet_name=private
 image_name=rhcos-vanilla-openstack
-ssh_authorized_keys="$(head -n1 ~/.ssh/id_ed25519.pub)"
+export autoscaling_nodegroup_min=0
+export autoscaling_nodegroup_max=5
+export autoscaling_shape=VM.Standard.E4.Flex
+export autoscaling_shapeconfig_cpu=6
+export autoscaling_shapeconfig_memory=16
 
 vcn=$(oci network vcn list --compartment-id "$compartment" --display-name "$oci_cluster_name" | jq -r '.data[0].id')
 apiserver_lb=$(oci lb load-balancer list --compartment-id $compartment --display-name ${oci_cluster_name}-openshift_api_apps_lb | jq -r '.data[].id')
@@ -23,8 +27,7 @@ subnet=$(oci network subnet list --compartment-id "$compartment" --vcn-id "$vcn"
 nsg=$(oci network nsg list --compartment-id "$compartment" --vcn-id "$vcn" --display-name "$nsg_name" | jq -r '.data[0].id')
 image=$(oci compute image list --compartment-id "$compartment" --display-name "$image_name" | jq -r '.data[0].id')
 
-export namespace
-export ssh_authorized_keys
+export capi_namespace
 export cluster_name
 export vcn
 export apiserver_lb
@@ -44,7 +47,6 @@ control_plane_endpoint=$control_plane_endpoint
 subnet=$subnet
 nsg=$nsg
 image=$image
-ssh_authorized_keys=$ssh_authorized_keys
 EOF
 
 mkdir -p manifests

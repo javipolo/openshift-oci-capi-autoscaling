@@ -3,15 +3,14 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
 metadata:
   name: ${cluster_name}-autoscaling
-  namespace: ${namespace}
+  namespace: ${capi_namespace}
   annotations:
-    capacity.cluster-autoscaler.kubernetes.io/cpu: "6"
-    capacity.cluster-autoscaler.kubernetes.io/memory: 16G
-    cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: "0"
-    cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: "5"
+    capacity.cluster-autoscaler.kubernetes.io/cpu: "${autoscaling_shapeconfig_cpu}"
+    capacity.cluster-autoscaler.kubernetes.io/memory: "${autoscaling_shapeconfig_memory}G"
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: "${autoscaling_nodegroup_min}"
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: "${autoscaling_nodegroup_max}"
 spec:
   clusterName: ${cluster_name}
-  replicas: 0
   selector:
     matchLabels:
   template:
@@ -21,6 +20,6 @@ spec:
         dataSecretName: ${cluster_name}-bootstrap
       infrastructureRef:
         name: ${cluster_name}-autoscaling
-        namespace: ${namespace}
+        namespace: ${capi_namespace}
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
         kind: OCIMachineTemplate

@@ -61,7 +61,9 @@ clusterctl generate provider --core cluster-api | grep -vE 'runAs(User|Group)' |
 ## Install upstream cluster-autoscaler
 
 ```
-helm install  cluster-autoscaler autoscaler/cluster-autoscaler --values cluster-autoscaler-values.yaml --namespace capi-system
+helm repo add autoscaler https://kubernetes.github.io/autoscaler
+helm repo update
+helm install oci-cluster-autoscaler autoscaler/cluster-autoscaler --values cluster-autoscaler-values.yaml --namespace capi-system
 ```
 
 and update permissions so cluster-autoscaler can access the objects in `cluster.x-k8s.io` apiGroup
