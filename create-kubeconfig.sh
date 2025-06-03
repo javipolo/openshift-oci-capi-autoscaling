@@ -10,7 +10,7 @@ fi
 
 if [ $# -lt 1 ]; then
     # Use default namespace
-    namespace=openshift-machine-api
+    namespace=capi-system
 else
     namespace="$1"
 fi
@@ -22,6 +22,11 @@ trap _cleanup exit
 _cleanup(){
     rm -fr $tmpdir
 }
+
+if oc get secret -n $namespace $secret -oname | grep -q .; then
+    echo "Secret $secret already exists, doing nothing"
+    exit 0
+fi
 
 oc create serviceaccount $cluster_name -n $namespace
 oc extract -n kube-system configmap/kube-root-ca.crt --to=- > $tmpdir/cluster-ca.crt

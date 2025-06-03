@@ -3,14 +3,11 @@
 Here is a runbook on how to achieve Cluster Autoscaling in an Openshift cluster in Oracle Cloud
 To do so, we rely on Cluster API (CAPI) with OCI infrastructure provider
 
+There are two ways of installing this:
+- Provision a cluster, and then deploy the different components
+- Use the oci-autoscaling-operator to set everything up
+
 ## Modified or custom images
-For this PoC we use custom images. Here's some more information about those custom images
-
-### cluster-capi-operator
-We need CAPI to support OCI resources (OCICluster, OCIMachine, ....)
-
-https://github.com/javipolo/cluster-capi-operator/tree/oci-support adds support for those resources
-A ready to use container image is in `quay.io/jpolo/cluster-capi-operator:latest`
 
 ### cluster-api-provider-oci
 cluster-api-provider-oci (or CAPOCI) has several changes:
@@ -21,27 +18,13 @@ cluster-api-provider-oci (or CAPOCI) has several changes:
 https://github.com/javipolo/cluster-api-provider-oci/tree/capi-autoscaling
 A ready to use container image is in `quay.io/jpolo/cluster-api-oci-controller-amd64:dev-skip-with-annotation`
 
-### cluster-autoscaler-operator
-cluster-autoscaler-operator honors the environment variables `CAPI_GROUP` and `CAPI_VERSION`, but we also need those variables to
-be exported to the `cluster-autoscaler` deployment it creates
+## Method 1. Installing components manually
+### Prerequisites
 
-https://github.com/javipolo/cluster-autoscaler-operator/tree/exportCAPIvars
+- [oci-cli](https://github.com/oracle/oci-cli) installed and configured
+- [clusterctl](https://cluster-api.sigs.k8s.io/user/quick-start#install-clusterctl)
 
-A ready to use container image is in `quay.io/jpolo/cluster-autoscaler-operator:latest`
-
-### cluster-autoscaler
-cluster-autoscaler current version in Openshift 4.18.10 does not detect our `MachineDeployment`, but the latest version in the
-official git repository does. All that takes is building the main branch
-
-https://github.com/openshift/kubernetes-autoscaler/tree/main
-
-A ready to use container image is in `quay.io/jpolo/cluster-autoscaler:latest`
-
-## Prerequisites
-
-- oci-cli installed and configured
-
-## Provision cluster
+### Provision cluster
 
 - Create cluster in [assisted installer](https://console.redhat.com/openshift/assisted-installer)
     - Use a domain name that you can manage in Oracle Cloud
@@ -63,86 +46,37 @@ A ready to use container image is in `quay.io/jpolo/cluster-autoscaler:latest`
 - Download kubeconfig and set it as default
 - Wait until cluster is fully settled. You can monitor the status with `oc get clusterversion` and `oc get clusteroperators`
 
-## Create a new OCI custom image
-  Using [rhcos-openstack](https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.18/latest/rhcos-4.18.1-x86_64-openstack.x86_64.qcow2.gz)
+### Create a new OCI custom image
+  [Create a Custom Linux Image](https://docs.public.oneportal.content.oci.oraclecloud.com/en-us/iaas/compute-cloud-at-customer/topics/images/importing-custom-linux-imges.htm) using [rhcos-openstack qcow2 file](https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.18/latest/rhcos-4.18.1-x86_64-openstack.x86_64.qcow2.gz)
 
-## Provision CAPI
-
-- Set `TechPreviewNoUpgrade` featureSet to enable CAPI
-```
-oc patch featuregate cluster --type merge -p '{"spec":{"featureSet":"TechPreviewNoUpgrade"}}'
-```
-
-- Wait until CAPI operator is present in `openshift-cluster-api` namespace
-```
-oc get po -n openshift-cluster-api -w
-```
-
-## Disable openshift cluster version
-We will need to tweak some operators, so we need to stop Cluster Version Operator to prevent it from rolling back our changes
-```
-oc -n openshift-cluster-version scale deploy/cluster-version-operator --replicas 0
-```
-
-## Use custom version of cluster-capi-operator
-- Use our custom cluster-capi-operator
-```
-oc patch deployment cluster-capi-operator \
-  -n openshift-cluster-api \
-  --type='strategic' \
-  -p='{ "spec": {
-          "template": {
-            "spec": {
-              "containers": [
-                {
-                  "name": "cluster-capi-operator",
-                  "image": "quay.io/jpolo/cluster-capi-operator:latest"
-                },
-                {
-                  "name": "machine-api-migration",
-                  "image": "quay.io/jpolo/cluster-capi-operator:latest"
-                }
-              ] } } } }'
-```
-
-- Patch cluster-autoscaler-operator to
-  - Use a custom container image
-  - Set CAPI_GROUP to the generic CAPI version
-  - Set a custom cluster-autoscaler container image to be used
-```
-oc patch deployment cluster-autoscaler-operator \
-  -n openshift-machine-api \
- --type='strategic' \
- -p='{ "spec": {
-         "template": {
-           "spec": {
-             "containers": [
-               {
-                 "name": "cluster-autoscaler-operator",
-                 "image": "quay.io/jpolo/cluster-autoscaler-operator:latest",
-                 "env": [
-                   {
-                     "name": "CAPI_GROUP",
-                     "value": "cluster.x-k8s.io"
-                   },
-                   {
-                     "name": "CLUSTER_AUTOSCALER_IMAGE",
-                     "value": "quay.io/jpolo/cluster-autoscaler:latest"
-                   }
-                 ] } ] } } } }'
-```
-
-- Update permissions so cluster-autoscaler can access the objects in `cluster.x-k8s.io` apiGroup
-```
-oc apply -f role-cluster-autoscaler.yaml
-```
-
-## Provision CAPOCI
+### Install cert-manager
+cert-manager is needed for both CAPI and CAPOCI, so we need to install it first
 
 - Install cert-manager
 ```
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
 ```
+
+### Install upstream CAPI
+
+```
+clusterctl generate provider --core cluster-api | grep -vE 'runAs(User|Group)' | oc apply -f -
+```
+
+### Install upstream cluster-autoscaler
+
+```
+helm repo add autoscaler https://kubernetes.github.io/autoscaler
+helm repo update
+helm install oci-cluster-autoscaler autoscaler/cluster-autoscaler --values cluster-autoscaler-values.yaml --namespace capi-system
+```
+
+and update permissions so cluster-autoscaler can access the objects in `cluster.x-k8s.io` apiGroup
+```
+oc apply -f role-cluster-autoscaler.yaml
+```
+
+### Provision CAPOCI
 
 - Clone CAPOCI repo
 ```
@@ -162,7 +96,8 @@ make -C cluster-api-provider-oci import-oci-cli-config
 make -C cluster-api-provider-oci deploy
 ```
 
-## Create CAPI cluster
+### Create CAPI cluster
+
 - Create bootstrap ignition in a secret
 ```
 ./create-bootstrap-ignition.sh
@@ -189,6 +124,34 @@ oc apply -f manifests/
 oc get cluster -n openshift-machine-api -w
 ```
 
+## Method 2. Everything automated with oci-autoscaling-operator
+
+### Provision cluster
+
+We create a cluster in the same way as before, just using a different terraform stack that:
+- Creates a new IAM user to be used by CAPOCI
+- Includes manifests to deploy oci-autoscaling-operator
+
+#### Steps
+- Create cluster in [assisted installer](https://console.redhat.com/openshift/assisted-installer)
+    - Use a domain name that you can manage in Oracle Cloud
+    - Enable `Integrate with external partner platforms` - `Oracle Cloud Infrastructure`
+    - Create minimal ISO
+    - Upload ISO to OCI bucket
+    - Create pre-authenticated request for ISO in bucket
+- Create OCI stack:
+    - My-configuration
+    - Using zip file: [create-cluster-autoscaling-v0.1.0.zip](https://github.com/javipolo/oci-openshift/releases/)
+    - Set the cluster name to the same name than in assisted-installer
+    - Copy pre-authenticated request into `Openshift image source URI`
+    - Set the `zone DNS` to the same domain than you set in assisted-installer
+    - Configure the rest of parameters as desired
+    - Run apply on the created stack
+- Go back to assisted service UI and set the node roles
+    - Add an `oci.yml` custom manifest
+        - Copy it from the OCI stack output `dynamic_custom_manifest`
+- Download kubeconfig and set it as default
+- Wait until cluster is fully settled. You can monitor the status with `oc get clusterversion` and `oc get clusteroperators`
 
 ## Test autoscaling
 - Run csr auto approval in other terminal
@@ -226,12 +189,9 @@ oc scale deployment -n default nginx --replicas=15
 - Wait for node to be removed
 
 ## Issues found and things to improve
-- CAPI does not create automatically kubeconfig resource.
-- Openshift's CAPI uses cluster.x-k8s.io as apiGroup, while openshift-cluster-autoscaler uses machine.openshift.io.
-- CAPOCI requires cert-manager.
 - CAPOCI installation in openshift requires fixing SCC issues. Added to our custom capoci repo.
 - CAPOCI is unable to reconcile an existing apiserver. According to [documentation](https://oracle.github.io/cluster-api-provider-oci/gs/externally-managed-cluster-infrastructure.html#example-ocicluster-spec-with-external-infrastructure) an annotation should be enough, but when applying it, cluster never shows as Provisioned. We hacked it into CAPOCI to achieve this but we should probably do it in a better way.
 - CAPOCI does not automatically set memory/cpu/resources needed annotations in MachineDeployment: `capacity.cluster-autoscaler.kubernetes.io/cpu: "6"`. See https://github.com/kubernetes-sigs/cluster-api/blob/main/docs/proposals/20210310-opt-in-autoscaling-from-zero.md
 - New nodes dont pick up hostname automatically. Had to add a systemd unit to do so. We should investigate why
 - Nodes need to be manually approved with `oc adm certificate approve`. Some automatic system should be created. [This is how Hypershift handles it](https://github.com/openshift/hypershift/pull/5349)
-- cluster-autoscaler keeps complaining about pre-existing nodes not being handled by anything. It would be nice to tell the compoment to ignore those nodes
+- cluster-autoscaler keeps complaining about pre-existing nodes not being handled by anything. It would be nice to tell the compoment to ignore those nodes.

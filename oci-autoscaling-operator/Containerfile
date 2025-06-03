@@ -1,0 +1,40 @@
+FROM registry.access.redhat.com/ubi9/ubi:9.6
+
+RUN dnf install -y \
+      gettext \
+      git \
+      golang-bin \
+      jq \
+      make \
+      python-pip \
+    && pip install yq
+
+# Install oc
+ARG OC_VERSION=4.18.15
+RUN curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OC_VERSION}/openshift-client-linux-${OC_VERSION}.tar.gz -o /tmp/openshift-client.tgz \
+    && tar xpvzf /tmp/openshift-client.tgz -C /usr/bin \
+    && rm -fr /tmp/openshift-client.tgz
+
+# Install clusterctl
+ARG CLUSTERCTL_VERSION=v1.10.2
+RUN curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/${CLUSTERCTL_VERSION}/clusterctl-linux-amd64 -o /usr/bin/clusterctl \
+    && chmod +x /usr/bin/clusterctl
+
+# Install helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+
+WORKDIR /usr/app
+
+COPY oci-autoscaling-operator/oci-autoscaling-operator.sh \
+     oci-autoscaling-operator/oci-autoscaling-operator-functions.sh \
+     oci-autoscaling-operator/wait-and-sign-all-certificates.sh \
+     role-cluster-autoscaler.yaml \
+     cluster-autoscaler-values.yaml \
+     create-bootstrap-ignition.sh \
+     set-hostname-oci-ignition.json \
+     create-kubeconfig.sh \
+     .
+COPY templates ./templates
+
+CMD [ "./oci-autoscaling-operator.sh" ]
