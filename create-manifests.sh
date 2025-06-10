@@ -10,7 +10,7 @@ fi
 
 export compartment=ocid1.compartment.oc1..aaaaaaaasno3ok3vmccrkahvyogfqdzyizp4vrpluxlgrjnhcins5hjoh6yq
 cluster_name=$(oc get infrastructure cluster -ojsonpath='{.status.infrastructureName}')
-oci_cluster_name=$(echo "$cluster_name" | rev | cut -d - -f 2- | rev)
+export oci_cluster_name=$(echo "$cluster_name" | rev | cut -d - -f 2- | rev)
 nsg_name=cluster-compute-nsg
 subnet_name=private
 image_name=rhcos-vanilla-openstack
