@@ -18,15 +18,133 @@ The architecture works by having the cluster-autoscaler monitor pending pods and
 Before starting, ensure you have:
 
 1. **Oracle Cloud CLI (oci-cli)** installed and configured with proper credentials
-2. **clusterctl** - The Cluster API management tool
-3. **An existing OpenShift cluster on OCI** with external platform integration enabled
-4. **Administrative access** to the OpenShift cluster
-5. **A custom RHCOS image** in your OCI tenancy (we'll cover this)
-6. **Domain management** capabilities in OCI for your cluster's domain
+2. **OpenShift CLI (oc)** - The OpenShift command line tool
+3. **clusterctl** - The Cluster API management tool
+4. **Helm** - Package manager for Kubernetes (for installing cluster-autoscaler)
+5. **An existing OpenShift cluster on OCI** with external platform integration enabled
+6. **Administrative access** to the OpenShift cluster
+7. **A custom RHCOS image** in your OCI tenancy (we'll cover this)
+8. **Domain management** capabilities in OCI for your cluster's domain
 
 ## Method 1: Manual Component Installation
 
 This method provides full control and understanding of each component. We'll install and configure everything step by step.
+
+### Step 0: Create Dedicated OCI User for CAPOCI
+
+Before starting the installation, create a dedicated OCI user for CAPOCI operations instead of using your personal account. This follows the principle of least privilege and improves security.
+
+#### Create the CAPOCI User
+
+1. **Navigate to Identity & Security → Users** in the OCI Console
+2. **Create a new user**:
+   - Name: `capoci-service-user`
+   - Description: `Service user for Cluster API Provider OCI operations`
+   - Email: Use a service email or your email for notifications
+
+#### Generate API Key for the User
+
+1. **Click on the newly created user**
+2. **Go to API Keys → Add API Key**
+3. **Generate API Key Pair**:
+   - Download both the private key and copy the configuration snippet
+   - Save the private key securely (e.g., `~/.oci/capoci_api_key.pem`)
+
+The configuration snippet will look like:
+```
+[DEFAULT]
+user=ocid1.user.oc1..aaaaaaaxxxxx
+fingerprint=xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx
+tenancy=ocid1.tenancy.oc1..aaaaaaaxxxxx
+region=us-ashburn-1
+key_file=<path to your private keyfile> # TODO
+```
+
+#### Create IAM Policies for CAPOCI User
+
+Create the necessary IAM policies to grant the minimal required permissions:
+
+```bash
+# Create a group for CAPOCI users
+oci iam group create --compartment-id <your-tenancy-ocid> --name capoci-users --description "Users for Cluster API Provider OCI"
+
+# Add the user to the group
+oci iam group add-user --group-id <capoci-group-ocid> --user-id <capoci-user-ocid>
+```
+
+**Create the following IAM policies** in your tenancy (adjust compartment names as needed):
+
+1. **Core Compute Management Policy**:
+```
+Policy Name: capoci-compute-management
+Description: Allows CAPOCI to manage compute instances
+Compartment: root (or your specific compartment)
+Policy Statements:
+Allow group capoci-users to manage instances in compartment <your-compartment-name>
+Allow group capoci-users to manage instance-configurations in compartment <your-compartment-name>
+Allow group capoci-users to manage instance-pools in compartment <your-compartment-name>
+Allow group capoci-users to read images in compartment <your-compartment-name>
+Allow group capoci-users to manage volume-attachments in compartment <your-compartment-name>
+Allow group capoci-users to manage volumes in compartment <your-compartment-name>
+```
+
+2. **Networking Management Policy**:
+```
+Policy Name: capoci-network-management
+Description: Allows CAPOCI to manage networking resources
+Compartment: root (or your specific compartment)
+Policy Statements:
+Allow group capoci-users to use virtual-network-family in compartment <your-compartment-name>
+Allow group capoci-users to manage network-security-groups in compartment <your-compartment-name>
+Allow group capoci-users to manage load-balancers in compartment <your-compartment-name>
+```
+
+3. **Additional Read Permissions**:
+```
+Policy Name: capoci-read-permissions
+Description: Allows CAPOCI to read necessary resources
+Compartment: root (or your specific compartment)
+Policy Statements:
+Allow group capoci-users to read compartments in tenancy
+Allow group capoci-users to read availability-domains in compartment <your-compartment-name>
+Allow group capoci-users to read fault-domains in compartment <your-compartment-name>
+```
+
+#### Alternative: Using OCI CLI Commands
+
+You can also create these policies using the OCI CLI:
+
+```bash
+# Get your tenancy and compartment OCIDs
+TENANCY_OCID=$(oci iam compartment list --all --compartment-id-in-subtree true --access-level ACCESSIBLE --include-root --raw-output --query "data[?name=='<root>'].id | [0]")
+COMPARTMENT_OCID="your-compartment-ocid"  # Replace with your compartment OCID
+COMPARTMENT_NAME="your-compartment-name"  # Replace with your compartment name
+
+# Create the group
+GROUP_OCID=$(oci iam group create --compartment-id $TENANCY_OCID --name capoci-users --description "Users for Cluster API Provider OCI" --query "data.id" --raw-output)
+
+# Add user to group (replace with your CAPOCI user OCID)
+CAPOCI_USER_OCID="your-capoci-user-ocid"
+oci iam group add-user --group-id $GROUP_OCID --user-id $CAPOCI_USER_OCID
+
+# Create compute management policy
+oci iam policy create --compartment-id $TENANCY_OCID --name capoci-compute-management --description "Allows CAPOCI to manage compute instances" --statements '["Allow group capoci-users to manage instances in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage instance-configurations in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage instance-pools in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to read images in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage volume-attachments in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage volumes in compartment '$COMPARTMENT_NAME'"]'
+
+# Create network management policy
+oci iam policy create --compartment-id $TENANCY_OCID --name capoci-network-management --description "Allows CAPOCI to manage networking resources" --statements '["Allow group capoci-users to use virtual-network-family in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage network-security-groups in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage load-balancers in compartment '$COMPARTMENT_NAME'"]'
+
+# Create read permissions policy
+oci iam policy create --compartment-id $TENANCY_OCID --name capoci-read-permissions --description "Allows CAPOCI to read necessary resources" --statements '["Allow group capoci-users to read compartments in tenancy","Allow group capoci-users to read availability-domains in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to read fault-domains in compartment '$COMPARTMENT_NAME'"]'
+```
+
+#### Security Best Practices
+
+1. **Principle of Least Privilege**: The policies above provide only the minimum permissions needed for CAPOCI operations
+2. **Regular Key Rotation**: Rotate the API keys periodically
+3. **Monitor Usage**: Use OCI audit logs to monitor the service user's activity
+4. **Separate Compartments**: Consider using dedicated compartments for different environments (dev/staging/prod)
+
+**Note**: You'll use the CAPOCI service user's credentials in the CAPOCI configuration instead of your personal credentials in the upcoming steps.
 
 ### Step 1: Provision Your Base OpenShift Cluster
 
@@ -79,14 +197,14 @@ You need a custom Red Hat CoreOS image in your OCI tenancy for the autoscaling n
 cert-manager provides certificate management for CAPI components:
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
+oc apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
 ```
 
 Wait for cert-manager to be ready:
 ```bash
-kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
-kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
-kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+oc wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
+oc wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
+oc wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
 ```
 
 ### Step 4: Install Core Cluster API
@@ -101,7 +219,7 @@ The `grep -vE 'runAs(User|Group)'` removes security context constraints that con
 
 Wait for CAPI to be ready:
 ```bash
-kubectl wait --for=condition=Available --timeout=300s deployment/capi-controller-manager -n capi-system
+oc wait --for=condition=Available --timeout=300s deployment/capi-controller-manager -n capi-system
 ```
 
 ### Step 5: Install cluster-autoscaler
@@ -174,111 +292,52 @@ oc apply -f role-cluster-autoscaler.yaml
 
 ### Step 7: Install CAPOCI (Cluster API Provider OCI)
 
-Since we need a custom version of CAPOCI with specific patches, we'll clone and deploy it:
-
-```bash
-# Clone the custom CAPOCI repository
-git clone https://github.com/javipolo/cluster-api-provider-oci -b capi-autoscaling
-cd cluster-api-provider-oci
-```
+Install CAPOCI using the official method with `clusterctl`:
 
 **Configure OCI Credentials**:
 
-The CAPOCI provider needs OCI credentials. You can import them from your existing oci-cli configuration:
+First, set up your OCI credentials using the dedicated CAPOCI service user created in Step 0. You can either export them as environment variables or configure them in the clusterctl configuration file.
 
+**Option 1: Environment Variables (Recommended)**
 ```bash
-# Create the credentials script
-cat > import-oci-cli-config.sh << 'EOF'
-#!/bin/bash
-set -euo pipefail
+# Set OCI credentials for the dedicated CAPOCI service user
+export OCI_TENANCY_ID="your-tenancy-ocid"
+export OCI_USER_ID="your-capoci-service-user-ocid"  # Use the CAPOCI service user OCID
+export OCI_REGION="your-region"
+export OCI_FINGERPRINT="your-capoci-service-user-api-key-fingerprint"  # From the service user's API key
+export OCI_PRIVATE_KEY_PATH="~/.oci/capoci_api_key.pem"  # Path to the service user's private key
 
-# Extract OCI configuration from ~/.oci/config
-OCI_CONFIG_FILE=${OCI_CONFIG_FILE:-~/.oci/config}
-OCI_PROFILE=${OCI_PROFILE:-DEFAULT}
-
-if [[ ! -f "$OCI_CONFIG_FILE" ]]; then
-    echo "OCI config file not found at $OCI_CONFIG_FILE"
-    exit 1
-fi
-
-# Parse the OCI config file
-USER_OCID=$(awk -F'=' -v profile="$OCI_PROFILE" '
-    /^\[.*\]$/ { section = substr($0, 2, length($0)-2) }
-    section == profile && /^user=/ { print $2 }
-' "$OCI_CONFIG_FILE" | tr -d ' ')
-
-TENANCY_OCID=$(awk -F'=' -v profile="$OCI_PROFILE" '
-    /^\[.*\]$/ { section = substr($0, 2, length($0)-2) }
-    section == profile && /^tenancy=/ { print $2 }
-' "$OCI_CONFIG_FILE" | tr -d ' ')
-
-REGION=$(awk -F'=' -v profile="$OCI_PROFILE" '
-    /^\[.*\]$/ { section = substr($0, 2, length($0)-2) }
-    section == profile && /^region=/ { print $2 }
-' "$OCI_CONFIG_FILE" | tr -d ' ')
-
-FINGERPRINT=$(awk -F'=' -v profile="$OCI_PROFILE" '
-    /^\[.*\]$/ { section = substr($0, 2, length($0)-2) }
-    section == profile && /^fingerprint=/ { print $2 }
-' "$OCI_CONFIG_FILE" | tr -d ' ')
-
-KEY_FILE=$(awk -F'=' -v profile="$OCI_PROFILE" '
-    /^\[.*\]$/ { section = substr($0, 2, length($0)-2) }
-    section == profile && /^key_file=/ { print $2 }
-' "$OCI_CONFIG_FILE" | tr -d ' ')
-
-# Expand tilde in key_file path
-KEY_FILE="${KEY_FILE/#\~/$HOME}"
-
-if [[ ! -f "$KEY_FILE" ]]; then
-    echo "Private key file not found at $KEY_FILE"
-    exit 1
-fi
-
-# Create the secret
-oc create secret generic -n capoci-system oci-credentials \
-    --from-literal=user="$USER_OCID" \
-    --from-literal=tenancy="$TENANCY_OCID" \
-    --from-literal=region="$REGION" \
-    --from-literal=fingerprint="$FINGERPRINT" \
-    --from-file=key="$KEY_FILE"
-
-echo "OCI credentials imported successfully"
-EOF
-
-chmod +x import-oci-cli-config.sh
-./import-oci-cli-config.sh
+# Alternatively, you can set the private key content directly
+export OCI_PRIVATE_KEY="$(cat ~/.oci/capoci_api_key.pem)"
 ```
 
-**Deploy CAPOCI**:
+**Option 2: clusterctl Configuration File**
+```bash
+# Create the clusterctl config directory
+mkdir -p ~/.config/cluster-api
+
+# Create clusterctl configuration file
+cat > ~/.config/cluster-api/clusterctl.yaml << EOF
+providers:
+  - name: "oci"
+    url: "https://github.com/oracle/cluster-api-provider-oci/releases/latest/infrastructure-components.yaml"
+    type: "InfrastructureProvider"
+EOF
+```
+
+**Install CAPOCI using clusterctl**:
 
 ```bash
-# First create the namespace
-oc create namespace capoci-system
-
-# Deploy CAPOCI with the custom image
-cat > config/default/manager_image_patch.yaml << EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: controller-manager
-  namespace: system
-spec:
-  template:
-    spec:
-      containers:
-      - name: manager
-        image: quay.io/jpolo/cluster-api-oci-controller-amd64:dev-skip-with-annotation
-EOF
-
-# Apply the manifests
-kustomize build config/default | grep -vE 'runAs(User|Group)' | oc apply -f -
+# Initialize CAPOCI using the official method
+clusterctl init --infrastructure oci
 ```
 
 Wait for CAPOCI to be ready:
 ```bash
-kubectl wait --for=condition=Available --timeout=300s deployment/capoci-controller-manager -n capoci-system
+oc wait --for=condition=Available --timeout=300s deployment/capoci-controller-manager -n capoci-system
 ```
+
+**Note**: If you need specific customizations or patches (like skipping API LoadBalancer management for existing clusters), you may need to modify the deployed manifests after installation or use a custom provider URL pointing to a modified version of the provider manifests.
 
 ### Step 8: Create Bootstrap Ignition Configuration
 
@@ -721,7 +780,7 @@ data:
   image_name: "rhcos-vanilla-openstack"
 EOF
 
-# Example Secret for OCI credentials
+# Example Secret for OCI credentials (using the dedicated CAPOCI service user)
 cat > oci-autoscaling-operator-secret.yaml << EOF
 apiVersion: v1
 kind: Secret
@@ -730,11 +789,11 @@ metadata:
   namespace: capi-system
 type: Opaque
 data:
-  user: $(echo -n "ocid1.user.oc1..your-user-ocid" | base64)
+  user: $(echo -n "ocid1.user.oc1..your-capoci-service-user-ocid" | base64)  # Use the CAPOCI service user OCID
   tenancy: $(echo -n "ocid1.tenancy.oc1..your-tenancy-ocid" | base64)
   region: $(echo -n "us-ashburn-1" | base64)
-  fingerprint: $(echo -n "your:key:fingerprint" | base64)
-  key: $(base64 -w0 < ~/.oci/oci_api_key.pem)
+  fingerprint: $(echo -n "your:capoci:service:user:fingerprint" | base64)  # From the service user's API key
+  key: $(base64 -w0 < ~/.oci/capoci_api_key.pem)  # Use the service user's private key
 EOF
 
 oc apply -f oci-autoscaling-operator-configmap.yaml
