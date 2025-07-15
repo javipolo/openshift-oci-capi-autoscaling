@@ -2,3 +2,4 @@ files
 manifests
 cluster-api-provider-oci
 terraform
+tmp
