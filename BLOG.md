@@ -32,109 +32,226 @@ This method provides full control and understanding of each component. We'll ins
 
 ### Step 0: Create Dedicated OCI User for CAPOCI
 
-Before starting the installation, create a dedicated OCI user for CAPOCI operations instead of using your personal account. This follows the principle of least privilege and improves security.
+Before starting the installation, create a dedicated OCI user for CAPOCI operations instead of using your personal account. This follows the principle of least privilege and improves security. We'll do this entirely via the OCI CLI.
 
-#### Create the CAPOCI User
+#### Step 0.1: Set Configuration Variables
 
-1. **Navigate to Identity & Security → Users** in the OCI Console
-2. **Create a new user**:
-   - Name: `capoci-service-user`
-   - Description: `Service user for Cluster API Provider OCI operations`
-   - Email: Use a service email or your email for notifications
-
-#### Generate API Key for the User
-
-1. **Click on the newly created user**
-2. **Go to API Keys → Add API Key**
-3. **Generate API Key Pair**:
-   - Download both the private key and copy the configuration snippet
-   - Save the private key securely (e.g., `~/.oci/capoci_api_key.pem`)
-
-The configuration snippet will look like:
-```
-[DEFAULT]
-user=ocid1.user.oc1..aaaaaaaxxxxx
-fingerprint=xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx
-tenancy=ocid1.tenancy.oc1..aaaaaaaxxxxx
-region=us-ashburn-1
-key_file=<path to your private keyfile> # TODO
-```
-
-#### Create IAM Policies for CAPOCI User
-
-Create the necessary IAM policies to grant the minimal required permissions:
+First, set up the variables we'll use throughout this process:
 
 ```bash
-# Create a group for CAPOCI users
-oci iam group create --compartment-id <your-tenancy-ocid> --name capoci-users --description "Users for Cluster API Provider OCI"
-
-# Add the user to the group
-oci iam group add-user --group-id <capoci-group-ocid> --user-id <capoci-user-ocid>
+# Configuration variables - adjust these for your environment
+CAPOCI_USER_NAME="capoci-service-user"
+CAPOCI_USER_DESCRIPTION="Service user for Cluster API Provider OCI operations"
+CAPOCI_GROUP_NAME="capoci-users"
+CAPOCI_GROUP_DESCRIPTION="Users for Cluster API Provider OCI"
+COMPARTMENT_NAME="your-compartment-name"  # Replace with your actual compartment name
+KEY_FILE_PATH="$HOME/.oci/capoci_api_key.pem"
 ```
 
-**Create the following IAM policies** in your tenancy (adjust compartment names as needed):
+#### Step 0.2: Get Tenancy and Compartment Information
 
-1. **Core Compute Management Policy**:
-```
-Policy Name: capoci-compute-management
-Description: Allows CAPOCI to manage compute instances
-Compartment: root (or your specific compartment)
-Policy Statements:
-Allow group capoci-users to manage instances in compartment <your-compartment-name>
-Allow group capoci-users to manage instance-configurations in compartment <your-compartment-name>
-Allow group capoci-users to manage instance-pools in compartment <your-compartment-name>
-Allow group capoci-users to read images in compartment <your-compartment-name>
-Allow group capoci-users to manage volume-attachments in compartment <your-compartment-name>
-Allow group capoci-users to manage volumes in compartment <your-compartment-name>
-```
-
-2. **Networking Management Policy**:
-```
-Policy Name: capoci-network-management
-Description: Allows CAPOCI to manage networking resources
-Compartment: root (or your specific compartment)
-Policy Statements:
-Allow group capoci-users to use virtual-network-family in compartment <your-compartment-name>
-Allow group capoci-users to manage network-security-groups in compartment <your-compartment-name>
-Allow group capoci-users to manage load-balancers in compartment <your-compartment-name>
-```
-
-3. **Additional Read Permissions**:
-```
-Policy Name: capoci-read-permissions
-Description: Allows CAPOCI to read necessary resources
-Compartment: root (or your specific compartment)
-Policy Statements:
-Allow group capoci-users to read compartments in tenancy
-Allow group capoci-users to read availability-domains in compartment <your-compartment-name>
-Allow group capoci-users to read fault-domains in compartment <your-compartment-name>
-```
-
-#### Alternative: Using OCI CLI Commands
-
-You can also create these policies using the OCI CLI:
+Retrieve the OCIDs we'll need for the setup:
 
 ```bash
-# Get your tenancy and compartment OCIDs
+# Get your tenancy OCID
 TENANCY_OCID=$(oci iam compartment list --all --compartment-id-in-subtree true --access-level ACCESSIBLE --include-root --raw-output --query "data[?name=='<root>'].id | [0]")
-COMPARTMENT_OCID="your-compartment-ocid"  # Replace with your compartment OCID
-COMPARTMENT_NAME="your-compartment-name"  # Replace with your compartment name
+echo "Tenancy OCID: $TENANCY_OCID"
 
-# Create the group
-GROUP_OCID=$(oci iam group create --compartment-id $TENANCY_OCID --name capoci-users --description "Users for Cluster API Provider OCI" --query "data.id" --raw-output)
+# Get your compartment OCID
+COMPARTMENT_OCID=$(oci iam compartment list --all --compartment-id-in-subtree true --access-level ACCESSIBLE --raw-output --query "data[?name=='$COMPARTMENT_NAME'].id | [0]")
+if [ "$COMPARTMENT_OCID" = "null" ]; then
+    echo "Compartment '$COMPARTMENT_NAME' not found. Please check the compartment name."
+    exit 1
+fi
+echo "Compartment OCID: $COMPARTMENT_OCID"
+```
 
-# Add user to group (replace with your CAPOCI user OCID)
-CAPOCI_USER_OCID="your-capoci-user-ocid"
-oci iam group add-user --group-id $GROUP_OCID --user-id $CAPOCI_USER_OCID
+#### Step 0.3: Create the CAPOCI Service User
 
-# Create compute management policy
-oci iam policy create --compartment-id $TENANCY_OCID --name capoci-compute-management --description "Allows CAPOCI to manage compute instances" --statements '["Allow group capoci-users to manage instances in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage instance-configurations in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage instance-pools in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to read images in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage volume-attachments in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage volumes in compartment '$COMPARTMENT_NAME'"]'
+Create the dedicated user for CAPOCI operations:
 
-# Create network management policy
-oci iam policy create --compartment-id $TENANCY_OCID --name capoci-network-management --description "Allows CAPOCI to manage networking resources" --statements '["Allow group capoci-users to use virtual-network-family in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage network-security-groups in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to manage load-balancers in compartment '$COMPARTMENT_NAME'"]'
+```bash
+# Create the CAPOCI user
+CAPOCI_USER_OCID=$(oci iam user create \
+    --compartment-id "$TENANCY_OCID" \
+    --name "$CAPOCI_USER_NAME" \
+    --description "$CAPOCI_USER_DESCRIPTION" \
+    --query "data.id" \
+    --raw-output)
+echo "Created user: $CAPOCI_USER_OCID"
+```
 
-# Create read permissions policy
-oci iam policy create --compartment-id $TENANCY_OCID --name capoci-read-permissions --description "Allows CAPOCI to read necessary resources" --statements '["Allow group capoci-users to read compartments in tenancy","Allow group capoci-users to read availability-domains in compartment '$COMPARTMENT_NAME'","Allow group capoci-users to read fault-domains in compartment '$COMPARTMENT_NAME'"]'
+#### Step 0.4: Generate and Configure API Keys
+
+Generate a new RSA key pair and configure it for the service user:
+
+```bash
+# Create the .oci directory if it doesn't exist
+mkdir -p "$(dirname "$KEY_FILE_PATH")"
+
+# Generate a 2048-bit RSA private key
+openssl genrsa -out "$KEY_FILE_PATH" 2048
+
+# Generate the corresponding public key
+openssl rsa -pubout -in "$KEY_FILE_PATH" -out "${KEY_FILE_PATH%.pem}_public.pem"
+
+# Upload the public key to the user
+API_KEY_RESPONSE=$(oci iam user api-key upload \
+    --user-id "$CAPOCI_USER_OCID" \
+    --key-file "${KEY_FILE_PATH%.pem}_public.pem" \
+    --query "data" \
+    --raw-output)
+
+# Extract the fingerprint from the response
+FINGERPRINT=$(echo "$API_KEY_RESPONSE" | jq -r '.fingerprint')
+echo "API Key Fingerprint: $FINGERPRINT"
+
+# Clean up the temporary public key file
+rm -f "${KEY_FILE_PATH%.pem}_public.pem"
+```
+
+#### Step 0.5: Create IAM Group
+
+Create a group to manage permissions for CAPOCI users:
+
+```bash
+# Create the CAPOCI users group
+GROUP_OCID=$(oci iam group create \
+    --compartment-id "$TENANCY_OCID" \
+    --name "$CAPOCI_GROUP_NAME" \
+    --description "$CAPOCI_GROUP_DESCRIPTION" \
+    --query "data.id" \
+    --raw-output)
+echo "Created group: $GROUP_OCID"
+
+# Add the service user to the group
+oci iam group add-user \
+    --group-id "$GROUP_OCID" \
+    --user-id "$CAPOCI_USER_OCID"
+echo "User added to group successfully"
+```
+
+#### Step 0.6: Create IAM Policies
+
+Create the minimal required IAM policies for CAPOCI operations:
+
+**1. Core Compute Management Policy:**
+```bash
+oci iam policy create \
+    --compartment-id "$TENANCY_OCID" \
+    --name "capoci-compute-management" \
+    --description "Allows CAPOCI to manage compute instances" \
+    --statements "[
+        \"Allow group $CAPOCI_GROUP_NAME to manage instances in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to manage instance-configurations in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to manage instance-pools in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to read images in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to manage volume-attachments in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to manage volumes in compartment $COMPARTMENT_NAME\"
+    ]"
+```
+
+**2. Network Management Policy:**
+```bash
+oci iam policy create \
+    --compartment-id "$TENANCY_OCID" \
+    --name "capoci-network-management" \
+    --description "Allows CAPOCI to manage networking resources" \
+    --statements "[
+        \"Allow group $CAPOCI_GROUP_NAME to use virtual-network-family in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to manage network-security-groups in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to manage load-balancers in compartment $COMPARTMENT_NAME\"
+    ]"
+```
+
+**3. Read Permissions Policy:**
+```bash
+oci iam policy create \
+    --compartment-id "$TENANCY_OCID" \
+    --name "capoci-read-permissions" \
+    --description "Allows CAPOCI to read necessary resources" \
+    --statements "[
+        \"Allow group $CAPOCI_GROUP_NAME to read compartments in tenancy\",
+        \"Allow group $CAPOCI_GROUP_NAME to read availability-domains in compartment $COMPARTMENT_NAME\",
+        \"Allow group $CAPOCI_GROUP_NAME to read fault-domains in compartment $COMPARTMENT_NAME\"
+    ]"
+```
+
+#### Step 0.7: Generate OCI Configuration
+
+Create the OCI configuration file for the CAPOCI service user:
+
+```bash
+# Get your default region
+REGION=$(oci iam region-subscription list --query "data[0].\"region-name\"" --raw-output)
+
+# Create the OCI config file for CAPOCI
+cat > "$HOME/.oci/capoci_config" << EOF
+[CAPOCI]
+user=$CAPOCI_USER_OCID
+fingerprint=$FINGERPRINT
+tenancy=$TENANCY_OCID
+region=$REGION
+key_file=$KEY_FILE_PATH
+EOF
+
+echo "OCI configuration created at: $HOME/.oci/capoci_config"
+```
+
+#### Step 0.8: Configure Environment Variables
+
+Set up the environment variables that CAPOCI will use:
+
+```bash
+# Display the configuration for future use
+echo "=================================="
+echo "CAPOCI User Setup Complete!"
+echo "=================================="
+echo ""
+echo "User OCID: $CAPOCI_USER_OCID"
+echo "Fingerprint: $FINGERPRINT"
+echo "Tenancy OCID: $TENANCY_OCID"
+echo "Region: $REGION"
+echo "Private Key: $KEY_FILE_PATH"
+echo ""
+
+# Option 1: Export environment variables directly
+export OCI_TENANCY_ID="$TENANCY_OCID"
+export OCI_USER_ID="$CAPOCI_USER_OCID"
+export OCI_REGION="$REGION"
+export OCI_FINGERPRINT="$FINGERPRINT"
+export OCI_PRIVATE_KEY_PATH="$KEY_FILE_PATH"
+
+echo "Environment variables set for current session:"
+echo "export OCI_TENANCY_ID=\"$TENANCY_OCID\""
+echo "export OCI_USER_ID=\"$CAPOCI_USER_OCID\""
+echo "export OCI_REGION=\"$REGION\""
+echo "export OCI_FINGERPRINT=\"$FINGERPRINT\""
+echo "export OCI_PRIVATE_KEY_PATH=\"$KEY_FILE_PATH\""
+echo ""
+
+# Option 2: Use the config file (alternative)
+echo "Or alternatively, use the config file:"
+echo "export OCI_CONFIG_FILE=\"$HOME/.oci/capoci_config\""
+echo "export OCI_CONFIG_PROFILE=\"CAPOCI\""
+```
+
+#### Step 0.9: Verify the Setup
+
+Test that the new service user is working correctly:
+
+```bash
+# Test using the new credentials via config file
+export OCI_CONFIG_FILE="$HOME/.oci/capoci_config"
+export OCI_CONFIG_PROFILE="CAPOCI"
+
+# Verify the user can be accessed
+oci iam user get --user-id "$CAPOCI_USER_OCID"
+
+# Test basic compartment access
+oci iam compartment get --compartment-id "$COMPARTMENT_OCID"
+
+echo "CAPOCI service user setup verified successfully!"
 ```
 
 #### Security Best Practices
