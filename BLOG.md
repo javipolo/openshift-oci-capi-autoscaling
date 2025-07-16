@@ -41,6 +41,7 @@ First, set up the variables we'll use throughout this process:
 ```bash
 # Configuration variables - adjust these for your environment
 CAPOCI_USER_NAME="capoci-service-user"
+CAPOCI_USER_EMAIL="your_email@somewhere.net" # Replace with a valid e-mail
 CAPOCI_USER_DESCRIPTION="Service user for Cluster API Provider OCI operations"
 CAPOCI_GROUP_NAME="capoci-users"
 CAPOCI_GROUP_DESCRIPTION="Users for Cluster API Provider OCI"
@@ -54,7 +55,7 @@ Retrieve the OCIDs we'll need for the setup:
 
 ```bash
 # Get your tenancy OCID
-TENANCY_OCID=$(oci iam compartment list --all --compartment-id-in-subtree true --access-level ACCESSIBLE --include-root --raw-output --query "data[?name=='<root>'].id | [0]")
+TENANCY_OCID=$(awk -F= '/tenancy/{print $2}' ~/.oci/config)
 echo "Tenancy OCID: $TENANCY_OCID"
 
 # Get your compartment OCID
@@ -75,6 +76,7 @@ Create the dedicated user for CAPOCI operations:
 CAPOCI_USER_OCID=$(oci iam user create \
     --compartment-id "$TENANCY_OCID" \
     --name "$CAPOCI_USER_NAME" \
+    --email "$CAPOCI_USER_EMAIL" \
     --description "$CAPOCI_USER_DESCRIPTION" \
     --query "data.id" \
     --raw-output)
@@ -139,7 +141,7 @@ Create the minimal required IAM policies for CAPOCI operations:
 ```bash
 oci iam policy create \
     --compartment-id "$TENANCY_OCID" \
-    --name "capoci-compute-management" \
+    --name "capoci-compute-management-${CAPOCI_GROUP_NAME}" \
     --description "Allows CAPOCI to manage compute instances" \
     --statements "[
         \"Allow group $CAPOCI_GROUP_NAME to manage instances in compartment $COMPARTMENT_NAME\",
@@ -155,7 +157,7 @@ oci iam policy create \
 ```bash
 oci iam policy create \
     --compartment-id "$TENANCY_OCID" \
-    --name "capoci-network-management" \
+    --name "capoci-network-management-${CAPOCI_GROUP_NAME}" \
     --description "Allows CAPOCI to manage networking resources" \
     --statements "[
         \"Allow group $CAPOCI_GROUP_NAME to use virtual-network-family in compartment $COMPARTMENT_NAME\",
@@ -168,7 +170,7 @@ oci iam policy create \
 ```bash
 oci iam policy create \
     --compartment-id "$TENANCY_OCID" \
-    --name "capoci-read-permissions" \
+    --name "capoci-read-permissions-${CAPOCI_GROUP_NAME}" \
     --description "Allows CAPOCI to read necessary resources" \
     --statements "[
         \"Allow group $CAPOCI_GROUP_NAME to read compartments in tenancy\",
